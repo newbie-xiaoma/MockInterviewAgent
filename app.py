@@ -2,207 +2,253 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import streamlit as st
 
 from agents.evaluator_agent import EvaluatorAgent
 from agents.interviewer_agent import InterviewerAgent
 from core.llm_client import LLMClient
-from core.memory import ConversationMemory
 from prompts.interviewer import INTERVIEWER_PERSONAS
-from utils.mock_data import DEFAULT_JOB_DESCRIPTION, DEFAULT_RESUME
+from utils.mock_data import DEFAULT_JOB_DESCRIPTION
+
+
+STATUS_NOT_STARTED = "未开始"
+STATUS_IN_PROGRESS = "进行中"
+STATUS_FINISHED = "已结束"
 
 
 def initialize_session_state() -> None:
-    """初始化 Streamlit 会话状态，避免页面刷新导致上下文丢失。"""
+    """初始化 Streamlit 会话状态。
+
+    Streamlit 每次交互都会从头执行脚本，因此跨轮对话必须放在
+    st.session_state 中。这里显式持久化三个核心状态：
+    - interviewer_agent：面试官智能体实例。
+    - conversation_memory：对话历史列表，供前端渲染和 LLM 上下文复用。
+    - interview_state：结构化面试状态机，记录覆盖能力点和结束决策。
+    - jd_text / resume_text：用于生成全局面试地图的岗位和候选人背景。
+    - interview_status：控制页面在“进行中/已结束”等状态之间切换。
+    """
     if "llm_client" not in st.session_state:
         st.session_state.llm_client = LLMClient()
 
-    if "memory" not in st.session_state:
-        st.session_state.memory = ConversationMemory()
+    if "conversation_memory" not in st.session_state:
+        st.session_state.conversation_memory = []
 
-    if "selected_persona" not in st.session_state:
-        st.session_state.selected_persona = next(iter(INTERVIEWER_PERSONAS))
+    if "interview_state" not in st.session_state:
+        st.session_state.interview_state = InterviewerAgent.build_initial_state()
 
-    if "interviewer_agent" not in st.session_state:
-        st.session_state.interviewer_agent = build_interviewer_agent(
-            st.session_state.selected_persona
-        )
+    if "interview_status" not in st.session_state:
+        st.session_state.interview_status = STATUS_NOT_STARTED
 
-    if "evaluator_agent" not in st.session_state:
+    if "jd_text" not in st.session_state:
+        st.session_state.jd_text = DEFAULT_JOB_DESCRIPTION
+
+    if "resume_text" not in st.session_state:
+        st.session_state.resume_text = ""
+
+    if "persona_name" not in st.session_state:
+        st.session_state.persona_name = "温柔引导型"
+    elif st.session_state.persona_name not in INTERVIEWER_PERSONAS:
+        st.session_state.persona_name = "温柔引导型"
+
+    if "final_report" not in st.session_state:
+        st.session_state.final_report = ""
+
+    if "interviewer_agent" not in st.session_state or not hasattr(
+        st.session_state.interviewer_agent,
+        "generate_turn",
+    ):
+        st.session_state.interviewer_agent = build_interviewer_agent()
+
+    if "evaluator_agent" not in st.session_state or not hasattr(
+        st.session_state.evaluator_agent,
+        "generate_evaluation_report",
+    ):
         st.session_state.evaluator_agent = EvaluatorAgent(
             llm_client=st.session_state.llm_client
         )
 
-    if "chat_records" not in st.session_state:
-        st.session_state.chat_records = []
 
-    if "report" not in st.session_state:
-        st.session_state.report = ""
-
-
-def build_interviewer_agent(persona_name: str) -> InterviewerAgent:
-    """根据面试风格创建面试官智能体。
-
-    Args:
-        persona_name: 面试风格名称。
-
-    Returns:
-        配置好提示词的面试官智能体实例。
-    """
-    persona_prompt = INTERVIEWER_PERSONAS[persona_name]
+def build_interviewer_agent() -> InterviewerAgent:
+    """根据当前 JD、风格和共享记忆创建面试官智能体。"""
     return InterviewerAgent(
         llm_client=st.session_state.llm_client,
-        memory=st.session_state.memory,
-        persona_prompt=persona_prompt,
+        conversation_memory=st.session_state.conversation_memory,
+        interview_state=st.session_state.interview_state,
+        jd_text=st.session_state.jd_text,
+        resume_text=st.session_state.resume_text,
+        persona_style=INTERVIEWER_PERSONAS[st.session_state.persona_name],
     )
 
 
-def reset_interviewer_when_persona_changed(persona_name: str) -> None:
-    """当用户切换面试风格时，刷新面试官配置但保留历史记忆。"""
-    if persona_name != st.session_state.selected_persona:
-        st.session_state.selected_persona = persona_name
-        st.session_state.interviewer_agent = build_interviewer_agent(persona_name)
+def start_interview(jd_text: str, resume_text: str, persona_name: str) -> None:
+    """开始一场新的面试。
 
-
-def render_sidebar() -> bool:
-    """渲染侧边栏配置区。
-
-    Returns:
-        是否点击了生成报告按钮。
+    开始面试时会清空旧历史和旧报告，并重新创建面试官智能体。
+    这样可以保证新的 JD 和面试风格不会被上一场会话污染。
     """
+    st.session_state.jd_text = jd_text.strip() or DEFAULT_JOB_DESCRIPTION
+    st.session_state.resume_text = resume_text.strip()
+    st.session_state.persona_name = persona_name
+    st.session_state.conversation_memory = []
+    st.session_state.interview_state = InterviewerAgent.build_initial_state()
+    st.session_state.final_report = ""
+    st.session_state.interview_status = STATUS_IN_PROGRESS
+    st.session_state.interviewer_agent = build_interviewer_agent()
+
+    # 首轮开场问题直接写入记忆。后续所有问答都由 interviewer_agent
+    # 继续追加到同一份 conversation_memory，实现前端和智能体共享上下文。
+    st.session_state.conversation_memory.append(
+        {
+            "role": "assistant",
+            "content": (
+                "你好，我们开始本轮模拟面试。请先用 1 分钟介绍一个"
+                "与你申请岗位最相关的项目。"
+            ),
+        }
+    )
+
+
+def finish_interview() -> None:
+    """结束当前面试，并切换到报告生成状态。"""
+    st.session_state.interview_status = STATUS_FINISHED
+    st.session_state.final_report = ""
+
+
+def finish_interview_from_agent(finish_reason: str) -> None:
+    """根据面试官状态机决策结束面试。"""
+    st.session_state.interview_status = STATUS_FINISHED
+    st.session_state.final_report = ""
+    if finish_reason:
+        st.session_state.interview_state["finish_reason"] = finish_reason
+
+
+def render_sidebar() -> None:
+    """渲染侧边栏设置区，并处理开始/结束按钮事件。"""
     with st.sidebar:
         st.header("面试设置")
 
+        jd_text = st.text_area(
+            "岗位 JD",
+            value=st.session_state.jd_text,
+            height=240,
+            placeholder="请输入本次模拟面试的岗位 JD...",
+        )
+
+        resume_text = st.text_area(
+            "简历 / 候选人背景",
+            value=st.session_state.resume_text,
+            height=180,
+            placeholder="可粘贴简历、项目经历或候选人背景信息...",
+        )
+
         persona_names = list(INTERVIEWER_PERSONAS.keys())
-        selected_persona = st.selectbox(
+        persona_name = st.selectbox(
             "面试风格",
             options=persona_names,
-            index=persona_names.index(st.session_state.selected_persona),
-        )
-        reset_interviewer_when_persona_changed(selected_persona)
-
-        st.divider()
-        st.subheader("模拟材料")
-        st.text_area("候选人简历", DEFAULT_RESUME, height=180, disabled=True)
-        st.text_area("岗位 JD", DEFAULT_JOB_DESCRIPTION, height=180, disabled=True)
-
-        st.divider()
-        generate_report = st.button(
-            "结束面试并生成报告",
-            type="primary",
-            use_container_width=True,
+            index=persona_names.index(st.session_state.persona_name),
         )
 
-        if st.button("清空当前会话", use_container_width=True):
-            clear_session()
+        st.divider()
+        if st.button("开始面试", type="primary", use_container_width=True):
+            start_interview(
+                jd_text=jd_text,
+                resume_text=resume_text,
+                persona_name=persona_name,
+            )
             st.rerun()
 
-    return generate_report
+        if st.button(
+            "结束面试并生成报告",
+            use_container_width=True,
+            disabled=st.session_state.interview_status != STATUS_IN_PROGRESS,
+        ):
+            finish_interview()
+            st.rerun()
+
+        st.caption(f"当前状态：{st.session_state.interview_status}")
 
 
-def clear_session() -> None:
-    """清空面试上下文和页面展示记录。"""
-    st.session_state.memory.clear()
-    st.session_state.chat_records = []
-    st.session_state.report = ""
-    st.session_state.interviewer_agent = build_interviewer_agent(
-        st.session_state.selected_persona
-    )
+def render_conversation_memory() -> None:
+    """把 conversation_memory 渲染为 Streamlit 聊天消息。"""
+    for message in st.session_state.conversation_memory:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
 
-def render_chat_history(chat_records: list[dict[str, str]]) -> None:
-    """渲染历史聊天记录。
+def handle_user_answer(user_text: str) -> None:
+    """处理候选人输入，并触发面试官智能体追问。
 
-    Args:
-        chat_records: 用于前端展示的聊天记录列表。
+    app.py 不直接拼 Prompt、不解析 JSON，只负责把用户输入交给智能体。
+    JSON 解析、action_decision 调试打印、reply_text 写回记忆都在
+    InterviewerAgent.generate_turn() 内完成。
     """
-    for record in chat_records:
-        with st.chat_message(record["role"]):
-            st.markdown(record["content"])
-
-
-def stream_text(text: str) -> Any:
-    """将完整文本包装成 Streamlit 可消费的生成器。
-
-    Args:
-        text: 需要展示的文本内容。
-
-    Yields:
-        分片文本。当前 LLMClient 为非流式封装，因此这里按词做轻量模拟。
-    """
-    for chunk in text.split(" "):
-        yield chunk + " "
-
-
-def handle_user_reply(user_reply: str) -> None:
-    """处理候选人的输入，并生成面试官回复。
-
-    Args:
-        user_reply: 候选人在聊天输入框提交的回答。
-    """
-    st.session_state.chat_records.append(
-        {"role": "user", "content": user_reply}
-    )
-
     with st.chat_message("user"):
-        st.markdown(user_reply)
+        st.markdown(user_text)
 
     with st.chat_message("assistant"):
-        answer = st.session_state.interviewer_agent.generate_question(user_reply)
-        if hasattr(st, "write_stream"):
-            displayed_answer = st.write_stream(stream_text(answer))
-        else:
-            st.markdown(answer)
-            displayed_answer = answer
+        with st.spinner("面试官正在分析你的回答..."):
+            turn_result = st.session_state.interviewer_agent.generate_turn(
+                user_text=user_text
+            )
+            reply_text = turn_result.reply_text
+        st.markdown(reply_text)
 
-    st.session_state.chat_records.append(
-        {"role": "assistant", "content": str(displayed_answer)}
-    )
+    if turn_result.should_finish:
+        finish_interview_from_agent(turn_result.finish_reason)
+        st.rerun()
 
 
-def handle_report_generation() -> None:
-    """调用评估智能体生成并展示 Markdown 面试报告。"""
-    history = st.session_state.memory.get_history()
-    st.session_state.report = st.session_state.evaluator_agent.generate_report(
-        history
-    )
+def render_in_progress_view() -> None:
+    """渲染进行中的面试聊天区。"""
+    render_conversation_memory()
+
+    user_text = st.chat_input("请输入你的面试回答...")
+    if user_text:
+        handle_user_answer(user_text)
+
+
+def render_finished_view() -> None:
+    """渲染已结束状态。
+
+    根据需求，面试结束后主聊天区不再渲染 conversation_memory，
+    而是调用 evaluator_agent 生成最终 Markdown 报告。
+    final_report 会被缓存到 session_state，避免页面刷新反复调用模型。
+    """
+    st.subheader("面试评估报告")
+
+    if not st.session_state.final_report:
+        with st.spinner("正在完成评分并生成报告..."):
+            st.session_state.final_report = (
+                st.session_state.evaluator_agent.generate_evaluation_report(
+                    full_memory_list=st.session_state.conversation_memory,
+                    jd_text=st.session_state.jd_text,
+                )
+            )
+
+    st.markdown(st.session_state.final_report)
+
+
+def render_not_started_view() -> None:
+    """渲染未开始状态。"""
+    st.info("请在左侧填写岗位 JD、选择面试风格，然后点击“开始面试”。")
 
 
 def main() -> None:
     """Streamlit 应用主函数。"""
-    st.set_page_config(
-        page_title="MockInterviewAgent",
-        layout="wide",
-    )
+    st.set_page_config(page_title="MockInterviewAgent", layout="wide")
     initialize_session_state()
 
     st.title("MockInterviewAgent")
-    st.caption("原生 Python + OpenAI SDK 驱动的 AI 模拟面试智能体")
+    st.caption("原生 Python + OpenAI SDK + Streamlit 的 AI 模拟面试系统")
 
-    should_generate_report = render_sidebar()
-    if should_generate_report:
-        handle_report_generation()
+    render_sidebar()
 
-    render_chat_history(st.session_state.chat_records)
-
-    if not st.session_state.chat_records:
-        with st.chat_message("assistant"):
-            welcome_text = (
-                "你好，我是本轮模拟面试官。请先用 1 分钟介绍一下你的项目经历，"
-                "我会根据你的回答继续追问。"
-            )
-            st.markdown(welcome_text)
-
-    user_reply = st.chat_input("请输入你的面试回答...")
-    if user_reply:
-        handle_user_reply(user_reply)
-
-    if st.session_state.report:
-        st.divider()
-        st.subheader("面试评估报告")
-        st.markdown(st.session_state.report)
+    if st.session_state.interview_status == STATUS_IN_PROGRESS:
+        render_in_progress_view()
+    elif st.session_state.interview_status == STATUS_FINISHED:
+        render_finished_view()
+    else:
+        render_not_started_view()
 
 
 if __name__ == "__main__":
