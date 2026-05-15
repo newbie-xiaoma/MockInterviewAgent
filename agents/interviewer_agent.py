@@ -290,6 +290,8 @@ class InterviewerAgent:
         repaired_response = self.llm_client.chat(
             messages=self._build_repair_messages(raw_response),
             temperature=0.0,
+            response_format={"type": "json_object"},
+            max_tokens=1200,
         )
         return self._parse_reply_json(repaired_response)
 
@@ -348,6 +350,8 @@ class InterviewerAgent:
         raw_response = self.llm_client.chat(
             messages=self._build_messages(),
             temperature=0.4,
+            response_format={"type": "json_object"},
+            max_tokens=1600,
         )
 
         try:

@@ -872,6 +872,8 @@ class EvaluatorAgent:
         repaired_response = self.llm_client.chat(
             messages=self._build_repair_messages(raw_output),
             temperature=0.0,
+            response_format={"type": "json_object"},
+            max_tokens=800,
         )
         return self._parse_score_json(repaired_response)
 
@@ -906,6 +908,8 @@ class EvaluatorAgent:
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.1,
+            response_format={"type": "json_object"},
+            max_tokens=800,
         )
 
         # 第一次尝试直接解析
