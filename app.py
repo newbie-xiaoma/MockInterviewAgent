@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import streamlit as st
 
 from agents.evaluator_agent import EvaluatorAgent
 from agents.interviewer_agent import InterviewerAgent
 from core.llm_client import LLMClient
 from prompts.interviewer import INTERVIEWER_PERSONAS
+from utils.file_io import extract_pdf_text
 from utils.mock_data import DEFAULT_JOB_DESCRIPTION
 
 
@@ -44,6 +47,12 @@ def initialize_session_state() -> None:
 
     if "resume_text" not in st.session_state:
         st.session_state.resume_text = ""
+
+    if "resume_pdf_name" not in st.session_state:
+        st.session_state.resume_pdf_name = ""
+
+    if "resume_pdf_digest" not in st.session_state:
+        st.session_state.resume_pdf_digest = ""
 
     if "persona_name" not in st.session_state:
         st.session_state.persona_name = "温柔引导型"
@@ -140,11 +149,34 @@ def render_sidebar() -> None:
             placeholder="请输入本次模拟面试的岗位 JD...",
         )
 
+        uploaded_resume_pdf = st.file_uploader(
+            "上传简历 PDF",
+            type=["pdf"],
+            accept_multiple_files=False,
+            disabled=st.session_state.interview_status == STATUS_IN_PROGRESS,
+        )
+        if uploaded_resume_pdf is not None:
+            pdf_bytes = uploaded_resume_pdf.getvalue()
+            pdf_digest = hashlib.sha256(pdf_bytes).hexdigest()
+            if pdf_digest != st.session_state.resume_pdf_digest:
+                try:
+                    st.session_state.resume_text = extract_pdf_text(
+                        pdf_bytes
+                    )
+                    st.session_state.resume_pdf_name = uploaded_resume_pdf.name
+                    st.session_state.resume_pdf_digest = pdf_digest
+                    st.success(f"已读取简历 PDF：{uploaded_resume_pdf.name}")
+                except (RuntimeError, ValueError) as exc:
+                    st.session_state.resume_pdf_name = uploaded_resume_pdf.name
+                    st.session_state.resume_pdf_digest = pdf_digest
+                    st.error(str(exc))
+
         resume_text = st.text_area(
             "简历 / 候选人背景",
             value=st.session_state.resume_text,
             height=180,
-            placeholder="可粘贴简历、项目经历或候选人背景信息...",
+            placeholder="可上传 PDF 自动读取，也可以粘贴简历、项目经历或候选人背景信息...",
+            disabled=st.session_state.interview_status == STATUS_IN_PROGRESS,
         )
 
         persona_names = list(INTERVIEWER_PERSONAS.keys())
