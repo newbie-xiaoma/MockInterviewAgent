@@ -53,6 +53,9 @@ def initialize_session_state() -> None:
     if "final_report" not in st.session_state:
         st.session_state.final_report = ""
 
+    if "final_pdf" not in st.session_state:
+        st.session_state.final_pdf = None
+
     if "interviewer_agent" not in st.session_state or not hasattr(
         st.session_state.interviewer_agent,
         "generate_turn",
@@ -92,6 +95,7 @@ def start_interview(jd_text: str, resume_text: str, persona_name: str) -> None:
     st.session_state.conversation_memory = []
     st.session_state.interview_state = InterviewerAgent.build_initial_state()
     st.session_state.final_report = ""
+    st.session_state.final_pdf = None
     st.session_state.interview_status = STATUS_IN_PROGRESS
     st.session_state.interviewer_agent = build_interviewer_agent()
 
@@ -112,12 +116,14 @@ def finish_interview() -> None:
     """结束当前面试，并切换到报告生成状态。"""
     st.session_state.interview_status = STATUS_FINISHED
     st.session_state.final_report = ""
+    st.session_state.final_pdf = None
 
 
 def finish_interview_from_agent(finish_reason: str) -> None:
     """根据面试官状态机决策结束面试。"""
     st.session_state.interview_status = STATUS_FINISHED
     st.session_state.final_report = ""
+    st.session_state.final_pdf = None
     if finish_reason:
         st.session_state.interview_state["finish_reason"] = finish_reason
 
@@ -210,9 +216,9 @@ def render_in_progress_view() -> None:
 def render_finished_view() -> None:
     """渲染已结束状态。
 
-    根据需求，面试结束后主聊天区不再渲染 conversation_memory，
-    而是调用 evaluator_agent 生成最终 Markdown 报告。
-    final_report 会被缓存到 session_state，避免页面刷新反复调用模型。
+    面试结束后主聊天区不渲染 conversation_memory，
+    而是调用 evaluator_agent 生成 Markdown 报告和 PDF 报告。
+    final_report 和 final_pdf 会被缓存到 session_state，避免重复调用模型。
     """
     st.subheader("面试评估报告")
 
@@ -222,9 +228,39 @@ def render_finished_view() -> None:
                 st.session_state.evaluator_agent.generate_evaluation_report(
                     full_memory_list=st.session_state.conversation_memory,
                     jd_text=st.session_state.jd_text,
+                    interview_state=st.session_state.interview_state,
                 )
             )
+            # 从评估者状态中取出 PDF
+            pdf_bytes = st.session_state.evaluator_agent.get_pdf_bytes()
+            if pdf_bytes:
+                st.session_state.final_pdf = pdf_bytes
 
+    # 下载按钮行
+    col_md, col_pdf = st.columns(2)
+    with col_md:
+        st.download_button(
+            label="下载 Markdown 报告",
+            data=st.session_state.final_report,
+            file_name="面试评估报告.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+    with col_pdf:
+        if st.session_state.final_pdf:
+            st.download_button(
+                label="下载 PDF 报告",
+                data=st.session_state.final_pdf,
+                file_name="面试评估报告.pdf",
+                mime="application/pdf",
+                type="primary",
+                use_container_width=True,
+            )
+        else:
+            pdf_error = st.session_state.evaluator_agent.get_pdf_error()
+            st.warning(f"PDF 生成失败：{pdf_error}" if pdf_error else "PDF 生成失败，请重试")
+
+    st.divider()
     st.markdown(st.session_state.final_report)
 
 

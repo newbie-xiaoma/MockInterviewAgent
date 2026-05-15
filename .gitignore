@@ -4,6 +4,7 @@ __pycache__/
 .idea/
 .vscode/
 .claude/
+assets/
 Descriptions/
 #暂时忽略readme.md，后续完善后再提交
 README.md
