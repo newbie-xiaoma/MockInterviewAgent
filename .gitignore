@@ -3,5 +3,7 @@ __pycache__/
 *.pyc
 .idea/
 .vscode/
+.claude/
+Descriptions/
 #暂时忽略readme.md，后续完善后再提交
-readme.md
+README.md
