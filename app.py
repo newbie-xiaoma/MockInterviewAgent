@@ -6,6 +6,7 @@ import hashlib
 
 import streamlit as st
 
+from agents.answer_guidance_agent import AnswerGuidanceAgent
 from agents.evaluator_agent import EvaluatorAgent
 from agents.interviewee_agent import IntervieweeAgent
 from agents.interviewer_agent import InterviewerAgent
@@ -69,6 +70,9 @@ def initialize_session_state() -> None:
     if "interviewee_draft" not in st.session_state:
         st.session_state.interviewee_draft = ""
 
+    if "answer_guidance" not in st.session_state:
+        st.session_state.answer_guidance = ""
+
     if "interviewer_agent" not in st.session_state or not hasattr(
         st.session_state.interviewer_agent,
         "generate_turn",
@@ -88,6 +92,14 @@ def initialize_session_state() -> None:
         "generate_draft_answer",
     ):
         st.session_state.interviewee_agent = IntervieweeAgent(
+            llm_client=st.session_state.llm_client
+        )
+
+    if "answer_guidance_agent" not in st.session_state or not hasattr(
+        st.session_state.answer_guidance_agent,
+        "generate_guidance",
+    ):
+        st.session_state.answer_guidance_agent = AnswerGuidanceAgent(
             llm_client=st.session_state.llm_client
         )
 
@@ -118,6 +130,7 @@ def start_interview(jd_text: str, resume_text: str, persona_name: str) -> None:
     st.session_state.final_report = ""
     st.session_state.final_pdf = None
     st.session_state.interviewee_draft = ""
+    st.session_state.answer_guidance = ""
     st.session_state.interview_status = STATUS_IN_PROGRESS
     st.session_state.interviewer_agent = build_interviewer_agent()
 
@@ -139,6 +152,7 @@ def finish_interview() -> None:
     st.session_state.interview_status = STATUS_FINISHED
     st.session_state.final_report = ""
     st.session_state.final_pdf = None
+    st.session_state.answer_guidance = ""
 
 
 def finish_interview_from_agent(finish_reason: str) -> None:
@@ -146,6 +160,7 @@ def finish_interview_from_agent(finish_reason: str) -> None:
     st.session_state.interview_status = STATUS_FINISHED
     st.session_state.final_report = ""
     st.session_state.final_pdf = None
+    st.session_state.answer_guidance = ""
     if finish_reason:
         st.session_state.interview_state["finish_reason"] = finish_reason
 
@@ -332,6 +347,33 @@ def render_finished_view() -> None:
 
     st.divider()
     st.markdown(st.session_state.final_report)
+
+    # —— 回答指导区域 ——
+    st.divider()
+    st.subheader("面试回答逐题指导")
+
+    if not st.session_state.answer_guidance:
+        if st.button("生成逐题回答指导", type="secondary", use_container_width=True):
+            with st.spinner("正在分析每道题的回答..."):
+                st.session_state.answer_guidance = (
+                    st.session_state.answer_guidance_agent.generate_guidance(
+                        full_memory_list=st.session_state.conversation_memory,
+                        jd_text=st.session_state.jd_text,
+                        resume_text=st.session_state.resume_text,
+                    )
+                )
+            st.rerun()
+
+    if st.session_state.answer_guidance:
+        st.download_button(
+            label="下载回答指导 (Markdown)",
+            data=st.session_state.answer_guidance,
+            file_name="面试回答指导.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+        with st.expander("查看逐题回答指导", expanded=True):
+            st.markdown(st.session_state.answer_guidance)
 
 
 def render_not_started_view() -> None:
