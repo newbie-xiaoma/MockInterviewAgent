@@ -11,6 +11,8 @@ from core.llm_client import LLMClient
 from prompts.interviewer import INTERVIEWER_SYSTEM_PROMPT_TEMPLATE
 
 
+INTERVIEWER_MODEL = "deepseek-v4-flash"
+
 ACTION_DECISIONS = {
     "next_question",
     "drill_down",
@@ -289,6 +291,7 @@ class InterviewerAgent:
         """对非 JSON 输出做一次结构化修复。"""
         repaired_response = self.llm_client.chat(
             messages=self._build_repair_messages(raw_response),
+            model=INTERVIEWER_MODEL,
             temperature=0.0,
             response_format={"type": "json_object"},
             max_tokens=1200,
@@ -349,6 +352,7 @@ class InterviewerAgent:
 
         raw_response = self.llm_client.chat(
             messages=self._build_messages(),
+            model=INTERVIEWER_MODEL,
             temperature=0.4,
             response_format={"type": "json_object"},
             max_tokens=1600,

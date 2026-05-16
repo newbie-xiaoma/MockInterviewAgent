@@ -27,7 +27,7 @@ class LLMClient:
     def chat(
         self,
         messages: list[dict[str, str]],
-        model: str = "deepseek-chat",
+        model: str = "deepseek-v4-pro",
         temperature: float = 0.7,
         response_format: dict[str, str] | None = None,
         max_tokens: int | None = None,

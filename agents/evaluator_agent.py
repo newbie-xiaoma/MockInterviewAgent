@@ -36,6 +36,7 @@ from prompts.evaluator import (
 # ---------------------------------------------------------------------------
 
 SCORE_KEYS = ("专业深度", "表达逻辑", "应变能力", "岗位匹配度")
+EVALUATOR_MODEL = "deepseek-v4-pro"
 
 # 系统中文字体路径（Windows）
 _FONT_PATH = Path("C:/Windows/Fonts/simhei.ttf")
@@ -533,6 +534,7 @@ class ReportGeneratorAgent:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            model=EVALUATOR_MODEL,
             temperature=0.2,
         )
 
@@ -871,6 +873,7 @@ class EvaluatorAgent:
         self.evaluation_state["repair_attempted"] = True
         repaired_response = self.llm_client.chat(
             messages=self._build_repair_messages(raw_output),
+            model=EVALUATOR_MODEL,
             temperature=0.0,
             response_format={"type": "json_object"},
             max_tokens=800,
@@ -907,6 +910,7 @@ class EvaluatorAgent:
                 {"role": "system", "content": SCORING_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
+            model=EVALUATOR_MODEL,
             temperature=0.1,
             response_format={"type": "json_object"},
             max_tokens=800,

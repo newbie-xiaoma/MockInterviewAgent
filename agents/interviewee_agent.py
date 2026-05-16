@@ -6,6 +6,9 @@ from core.llm_client import LLMClient
 from prompts.interviewee import INTERVIEWEE_SYSTEM_PROMPT_TEMPLATE
 
 
+INTERVIEWEE_MODEL = "deepseek-v4-flash"
+
+
 class IntervieweeAgent:
     """面试 Copilot：根据 JD、简历和对话历史生成候选人参考回答。"""
 
@@ -33,6 +36,7 @@ class IntervieweeAgent:
         ]
         return self.llm_client.chat(
             messages=messages,
+            model=INTERVIEWEE_MODEL,
             temperature=0.6,
-            max_tokens=600,
+            max_tokens=900,
         ).strip()
