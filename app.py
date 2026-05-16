@@ -7,6 +7,7 @@ import hashlib
 import streamlit as st
 
 from agents.evaluator_agent import EvaluatorAgent
+from agents.interviewee_agent import IntervieweeAgent
 from agents.interviewer_agent import InterviewerAgent
 from core.llm_client import LLMClient
 from prompts.interviewer import INTERVIEWER_PERSONAS
@@ -65,6 +66,9 @@ def initialize_session_state() -> None:
     if "final_pdf" not in st.session_state:
         st.session_state.final_pdf = None
 
+    if "interviewee_draft" not in st.session_state:
+        st.session_state.interviewee_draft = ""
+
     if "interviewer_agent" not in st.session_state or not hasattr(
         st.session_state.interviewer_agent,
         "generate_turn",
@@ -76,6 +80,14 @@ def initialize_session_state() -> None:
         "generate_evaluation_report",
     ):
         st.session_state.evaluator_agent = EvaluatorAgent(
+            llm_client=st.session_state.llm_client
+        )
+
+    if "interviewee_agent" not in st.session_state or not hasattr(
+        st.session_state.interviewee_agent,
+        "generate_draft_answer",
+    ):
+        st.session_state.interviewee_agent = IntervieweeAgent(
             llm_client=st.session_state.llm_client
         )
 
@@ -105,6 +117,7 @@ def start_interview(jd_text: str, resume_text: str, persona_name: str) -> None:
     st.session_state.interview_state = InterviewerAgent.build_initial_state()
     st.session_state.final_report = ""
     st.session_state.final_pdf = None
+    st.session_state.interviewee_draft = ""
     st.session_state.interview_status = STATUS_IN_PROGRESS
     st.session_state.interviewer_agent = build_interviewer_agent()
 
@@ -223,6 +236,8 @@ def handle_user_answer(user_text: str) -> None:
     with st.chat_message("user"):
         st.markdown(user_text)
 
+    st.session_state.interviewee_draft = ""
+
     with st.chat_message("assistant"):
         with st.spinner("面试官正在分析你的回答..."):
             turn_result = st.session_state.interviewer_agent.generate_turn(
@@ -239,6 +254,28 @@ def handle_user_answer(user_text: str) -> None:
 def render_in_progress_view() -> None:
     """渲染进行中的面试聊天区。"""
     render_conversation_memory()
+
+    col_help, _ = st.columns([1, 5])
+    with col_help:
+        need_help = st.button(
+            "💡 给我个提示",
+            help="不知道怎么答？让 AI 帮你写个草稿",
+        )
+
+    if need_help:
+        with st.spinner("AI 正在光速写草稿..."):
+            st.session_state.interviewee_draft = (
+                st.session_state.interviewee_agent.generate_draft_answer(
+                    conversation_memory=st.session_state.conversation_memory,
+                    jd_text=st.session_state.jd_text,
+                    resume_text=st.session_state.resume_text,
+                )
+            )
+
+    if st.session_state.interviewee_draft:
+        st.info(
+            f"**AI 推荐回答思路：**\n\n{st.session_state.interviewee_draft}"
+        )
 
     user_text = st.chat_input("请输入你的面试回答...")
     if user_text:
