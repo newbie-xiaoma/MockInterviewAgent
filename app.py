@@ -280,6 +280,7 @@ def render_in_progress_view() -> None:
     user_text = st.chat_input("请输入你的面试回答...")
     if user_text:
         handle_user_answer(user_text)
+        st.rerun()
 
 
 def render_finished_view() -> None:
