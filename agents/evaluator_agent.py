@@ -277,8 +277,8 @@ class PDFReportBuilder:
             pdf.rect(x0, y_before, col_widths[2], row_h)
             for line in desc_wrapped[:3]:
                 pdf.cell(col_widths[2], 5.5, line, border=0, align="L")
-                pdf.set_x(x0)
                 pdf.ln(5.5)
+                pdf.set_x(x0)  # ln() 会将 x 重置到左页边距，之后必须回正
             pdf.set_y(y_before + row_h)
 
         pdf.ln(4)
